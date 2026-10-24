@@ -8,9 +8,12 @@
       select { width: 100%; padding: 4px; font: inherit; }
       small { color: GrayText; }
       #status { min-height: 1.5em; }
+      header { display: none; align-items: center; gap: 8px; margin-bottom: 12px; font-weight: 700; font-size: 16px; }
+      body.popup header { display: flex; }
     </style>
   </head>
   <body>
+    <header><img src="icons/icon.svg" width="28" height="28" alt="" /> X Giffer</header>
     <label>GIF quality <select id="preset"></select></label>
     <p><small>Original keeps the source's size and frame timing. Smaller presets make lighter files.</small></p>
     <p id="status"></p>
