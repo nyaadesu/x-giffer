@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X Giffer",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Pronounced \"jiffer\". Adds GIF / MP4 download buttons to GIFs on X (Twitter). Conversion happens locally.",
   "homepage_url": "https://github.com/nyaadesu/x-giffer",
   "browser_specific_settings": {
