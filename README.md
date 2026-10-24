@@ -2,6 +2,9 @@
 
 *pronounced "jiffer"*
 
+**[Get X Giffer for Firefox](https://addons.mozilla.org/en-US/firefox/addon/x-giffer/)** (desktop and
+Android) · **[Open the Android share app](https://nyaadesu.github.io/x-giffer/)**
+
 Save GIFs from X (Twitter) as real `.gif` files. X stores "GIFs" as silent MP4s
 (`video.twimg.com/tweet_video/<id>.mp4`). This project fetches that MP4 and converts it to an
 animated GIF on your own device: it steps through the video frame by frame onto a canvas and
@@ -17,12 +20,18 @@ It has two parts that share `extension/converter.js`:
 
 ## Firefox extension
 
-**Try it now (temporary install):** open `about:debugging#/runtime/this-firefox`, choose
+**Install:** get it from Firefox Add-ons at
+<https://addons.mozilla.org/en-US/firefox/addon/x-giffer/>. It works in Firefox on desktop and
+in Firefox for Android (version 142 or newer).
+
+**From source (temporary install):** open `about:debugging#/runtime/this-firefox`, choose
 **Load Temporary Add-on…** and pick `extension/manifest.json`. The add-on stays loaded until you
 restart Firefox.
 
-**Permanent install:** release Firefox only installs signed add-ons. You can sign it yourself as
-an unlisted add-on (free, automatic, and it isn't published on AMO):
+**Your own signed build:** release Firefox only installs signed add-ons. If you've modified it,
+you can sign your own copy as an unlisted add-on (free, automatic, and not published). First
+change `browser_specific_settings.gecko.id` in `extension/manifest.json` to an ID of your own,
+because the published add-on's ID is taken:
 
 ```sh
 npx web-ext sign -s extension --channel unlisted \
@@ -32,8 +41,6 @@ npx web-ext sign -s extension --channel unlisted \
 Get the keys at <https://addons.mozilla.org/developers/addon/api/key/>, then open the `.xpi` it
 writes to `web-ext-artifacts/` in Firefox. Alternatively, set `xpinstall.signatures.required` to
 `false` in Developer Edition, Nightly or ESR.
-
-The extension also runs on Firefox for Android (version 142 or newer).
 
 Using it: hover a GIF on X and the **GIF** / **MP4** buttons appear in its top-right corner. The
 GIF button shows conversion progress, and the file lands in your Downloads folder as
