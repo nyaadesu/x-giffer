@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "X GIF Downloader",
+  "version": "1.0.0",
+  "description": "Adds GIF / MP4 download buttons to GIFs on X (Twitter). Conversion happens locally.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "x-gif-downloader@local",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": { "required": ["none"] }
+    }
+  },
+  "icons": { "48": "icons/icon.svg", "96": "icons/icon.svg" },
+  "permissions": ["downloads", "storage"],
+  "host_permissions": ["https://video.twimg.com/*", "https://pbs.twimg.com/*"],
+  "background": {
+    "scripts": ["background.js"],
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://*.x.com/*",
+        "https://twitter.com/*",
+        "https://*.twitter.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
+}
