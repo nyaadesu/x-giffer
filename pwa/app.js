@@ -11,25 +11,44 @@ const statusEl = $("status");
 const progressEl = $("progress");
 const resultsEl = $("results");
 const presetSelect = $("preset");
+const autosaveBox = $("autosave");
+const autocloseBox = $("autoclose");
 let lastLink = null;
 
-function loadPreset() {
+function loadSetting(key, fallback) {
   try {
-    return localStorage.getItem("xgd-preset") || DEFAULT_PRESET;
+    return localStorage.getItem(key) || fallback;
   } catch {
-    return DEFAULT_PRESET;
+    return fallback;
   }
 }
 
+function storeSetting(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
 function initPreset() {
-  fillPresetSelect(presetSelect, loadPreset());
+  fillPresetSelect(presetSelect, loadSetting("xgd-preset", DEFAULT_PRESET));
   presetSelect.addEventListener("change", () => {
-    try {
-      localStorage.setItem("xgd-preset", presetSelect.value);
-    } catch {}
+    storeSetting("xgd-preset", presetSelect.value);
     // Re-convert the post that's on screen with the new preset.
     if (lastLink && !goButton.disabled) run(lastLink);
   });
+}
+
+// What to do after converting a shared post. Auto-save is on unless turned off.
+function initToggles() {
+  autosaveBox.checked = loadSetting("xgd-autosave", "1") === "1";
+  autocloseBox.checked = loadSetting("xgd-autoclose", "0") === "1";
+  const sync = () => (autocloseBox.disabled = !autosaveBox.checked);
+  sync();
+  autosaveBox.addEventListener("change", () => {
+    storeSetting("xgd-autosave", autosaveBox.checked ? "1" : "0");
+    sync();
+  });
+  autocloseBox.addEventListener("change", () => storeSetting("xgd-autoclose", autocloseBox.checked ? "1" : "0"));
 }
 
 function setStatus(text, isError = false) {
@@ -96,9 +115,10 @@ function renderResult(file, mp4Url) {
   actions.append(save, mp4);
   card.append(img, meta, actions);
   resultsEl.append(card);
+  return save;
 }
 
-async function run(text) {
+async function run(text, { shared = false } = {}) {
   const parsed = parseStatus(text);
   if (!parsed) {
     setStatus("That doesn't look like an X post link.", true);
@@ -116,6 +136,7 @@ async function run(text) {
     if (!gifs.length) throw new Error("This post has no GIF.");
     const user = tweet.author?.screen_name || parsed.user;
     const settings = presetOptions(presetSelect.value);
+    const saves = [];
 
     for (const [i, gif] of gifs.entries()) {
       const label = gifs.length > 1 ? ` ${i + 1}/${gifs.length}` : "";
@@ -130,9 +151,24 @@ async function run(text) {
       progressEl.value = 0;
       const blob = await mp4ToGif(mp4, settings, (v) => (progressEl.value = v));
       const suffix = gifs.length > 1 ? `_${i + 1}` : "";
-      renderResult(new File([blob], `${user}_${tweet.id}${suffix}.gif`, { type: "image/gif" }), gif.url);
+      saves.push(renderResult(new File([blob], `${user}_${tweet.id}${suffix}.gif`, { type: "image/gif" }), gif.url));
     }
-    setStatus("Done.");
+    if (shared && autosaveBox.checked) {
+      for (const save of saves) save.click();
+      if (autocloseBox.checked) {
+        setStatus("Saved to Downloads. Closing…");
+        // Give the download a moment to read the blob before the page goes away.
+        // window.close() is allowed here because a share launch has one history entry.
+        setTimeout(() => {
+          window.close();
+          setStatus("Saved to Downloads.");
+        }, 1500);
+      } else {
+        setStatus("Saved to Downloads.");
+      }
+    } else {
+      setStatus("Done.");
+    }
   } catch (err) {
     console.error(err);
     setStatus(err.message || String(err), true);
@@ -149,6 +185,7 @@ form.addEventListener("submit", (e) => {
 });
 
 initPreset();
+initToggles();
 
 // Android share sheet lands here as ?title=…&text=…&url=… (see manifest share_target).
 const params = new URLSearchParams(location.search);
@@ -156,7 +193,7 @@ const shared = ["url", "text", "title"].map((k) => params.get(k)).find((v) => pa
 if (shared) {
   linkInput.value = shared;
   history.replaceState(null, "", location.pathname);
-  run(shared);
+  run(shared, { shared: true });
 }
 
 if ("serviceWorker" in navigator) {
