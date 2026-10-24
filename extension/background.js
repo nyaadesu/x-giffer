@@ -57,11 +57,28 @@ async function handle(port, { url, basename, format }) {
   await saveBlob(gif, `${basename}.gif`);
 }
 
+// Firefox stops an idle event page after ~30s, even mid-conversion, and
+// neither open ports nor timers count as activity. Extension API calls do,
+// so make a cheap one every few seconds while any job is running.
+let activeJobs = 0;
+let keepAliveTimer = null;
+
+async function keepAlive(job) {
+  if (activeJobs++ === 0) {
+    keepAliveTimer = setInterval(() => browser.runtime.getPlatformInfo(), 10_000);
+  }
+  try {
+    return await job();
+  } finally {
+    if (--activeJobs === 0) clearInterval(keepAliveTimer);
+  }
+}
+
 browser.runtime.onConnect.addListener((port) => {
   if (port.name !== "xgd-download") return;
   port.onMessage.addListener(async (msg) => {
     try {
-      await handle(port, msg);
+      await keepAlive(() => handle(port, msg));
       port.postMessage({ type: "done" });
     } catch (err) {
       console.error("[X Giffer]", err);
