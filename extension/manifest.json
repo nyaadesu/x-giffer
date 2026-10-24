@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X GIF Downloader",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Adds GIF / MP4 download buttons to GIFs on X (Twitter). Conversion happens locally.",
   "browser_specific_settings": {
     "gecko": {

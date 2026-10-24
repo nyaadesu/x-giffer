@@ -33,8 +33,22 @@ writes to `web-ext-artifacts/` in Firefox. Alternatively, set `xpinstall.signatu
 
 Using it: hover a GIF on X and the **GIF** / **MP4** buttons appear in its top-right corner. The
 GIF button shows conversion progress, and the file lands in your Downloads folder as
-`<user>_<postid>.gif`. Frame rate, maximum width and palette size are under the add-on's
-**Preferences**. The defaults are 15 fps, 480 px and 256 colours.
+`<user>_<postid>.gif`.
+
+### Quality presets
+
+Pick one in the add-on's **Preferences**, or in the dropdown in the PWA:
+
+| Preset | Size | Frame rate | Colours |
+| --- | --- | --- | --- |
+| **Original** (default) | source size | every source frame, exact timing | 256 |
+| Balanced | up to 720 px wide | up to 30 fps | 256 |
+| Small | up to 480 px wide | up to 20 fps | 256 |
+| Tiny | up to 320 px wide | up to 12 fps | 128 |
+
+The converter reads the frame timestamps from the MP4, so it keeps the source's own frames and
+durations instead of resampling. It also merges identical consecutive frames. GIFs can't play
+faster than 50 fps, so higher frame rates are thinned to fit.
 
 ## Android share shortcut (PWA)
 

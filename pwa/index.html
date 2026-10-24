@@ -39,9 +39,11 @@
       .result img { display: block; width: 100%; border-radius: 10px; background: #000; }
       .result .meta { color: var(--muted); font-size: 13px; margin: 8px 0; }
       .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-      details { margin-top: 24px; color: var(--muted); }
-      details label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0; }
-      details input { width: 90px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+      label.preset { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: var(--muted); }
+      label.preset select {
+        flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; font: inherit;
+        border: 1px solid var(--line); background: var(--card); color: var(--fg);
+      }
     </style>
   </head>
   <body>
@@ -52,15 +54,10 @@
         <input id="link" type="text" inputmode="url" placeholder="https://x.com/user/status/…" autocomplete="off" />
         <button id="go" type="submit">Get GIF</button>
       </form>
+      <label class="preset">Quality <select id="preset"></select></label>
       <div id="status"></div>
       <progress id="progress" hidden max="1" value="0"></progress>
       <div id="results"></div>
-      <details>
-        <summary>Settings</summary>
-        <label>Frames per second <input id="fps" type="number" min="1" max="50" /></label>
-        <label>Max width (px, 0 = original) <input id="maxWidth" type="number" min="0" step="10" /></label>
-        <label>Colors per frame <input id="colors" type="number" min="2" max="256" /></label>
-      </details>
     </main>
     <script type="module" src="app.js"></script>
   </body>

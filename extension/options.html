@@ -4,17 +4,15 @@
     <meta charset="utf-8" />
     <style>
       body { font: 14px/1.5 system-ui, sans-serif; padding: 12px; min-width: 320px; }
-      label { display: grid; grid-template-columns: 1fr 90px; align-items: center; gap: 8px; margin-bottom: 10px; }
-      input { width: 100%; box-sizing: border-box; }
+      label { display: grid; gap: 6px; }
+      select { width: 100%; padding: 4px; font: inherit; }
       small { color: GrayText; }
       #status { min-height: 1.5em; }
     </style>
   </head>
   <body>
-    <label>Frames per second <input id="fps" type="number" min="1" max="50" /></label>
-    <label>Max width (px, 0 = original) <input id="maxWidth" type="number" min="0" step="10" /></label>
-    <label>Colors per frame <input id="colors" type="number" min="2" max="256" /></label>
-    <small>Higher FPS / width / colors means bigger files and slower conversion.</small>
+    <label>GIF quality <select id="preset"></select></label>
+    <p><small>Original keeps the source's size and frame timing. Smaller presets make lighter files.</small></p>
     <p id="status"></p>
     <script type="module" src="options.js"></script>
   </body>

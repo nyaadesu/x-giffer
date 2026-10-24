@@ -1,7 +1,6 @@
 import { mp4ToGif } from "../extension/converter.js";
+import { DEFAULT_PRESET, fillPresetSelect, presetOptions } from "../extension/presets.js";
 
-const DEFAULTS = { fps: 15, maxWidth: 480, colors: 256 };
-const LIMITS = { fps: [1, 50], maxWidth: [0, 4096], colors: [2, 256] };
 const STATUS_RE = /(?:x|twitter|fxtwitter|fixupx|vxtwitter)\.com\/(?:([\w]+)\/status|i\/status|i\/web\/status)\/(\d+)/i;
 
 const $ = (id) => document.getElementById(id);
@@ -11,30 +10,26 @@ const goButton = $("go");
 const statusEl = $("status");
 const progressEl = $("progress");
 const resultsEl = $("results");
+const presetSelect = $("preset");
+let lastLink = null;
 
-function loadSettings() {
-  let stored = {};
+function loadPreset() {
   try {
-    stored = JSON.parse(localStorage.getItem("xgd-settings") || "{}");
-  } catch {}
-  return { ...DEFAULTS, ...stored };
+    return localStorage.getItem("xgd-preset") || DEFAULT_PRESET;
+  } catch {
+    return DEFAULT_PRESET;
+  }
 }
 
-function initSettings() {
-  const settings = loadSettings();
-  for (const key of Object.keys(DEFAULTS)) {
-    const input = $(key);
-    input.value = settings[key];
-    input.addEventListener("change", () => {
-      const [min, max] = LIMITS[key];
-      const value = Math.min(max, Math.max(min, Math.round(Number(input.value) || DEFAULTS[key])));
-      input.value = value;
-      const next = { ...loadSettings(), [key]: value };
-      try {
-        localStorage.setItem("xgd-settings", JSON.stringify(next));
-      } catch {}
-    });
-  }
+function initPreset() {
+  fillPresetSelect(presetSelect, loadPreset());
+  presetSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem("xgd-preset", presetSelect.value);
+    } catch {}
+    // Re-convert the post that's on screen with the new preset.
+    if (lastLink && !goButton.disabled) run(lastLink);
+  });
 }
 
 function setStatus(text, isError = false) {
@@ -109,7 +104,9 @@ async function run(text) {
     setStatus("That doesn't look like an X post link.", true);
     return;
   }
+  lastLink = text;
   goButton.disabled = true;
+  presetSelect.disabled = true;
   resultsEl.replaceChildren();
   progressEl.hidden = true;
 
@@ -118,7 +115,7 @@ async function run(text) {
     const { tweet, gifs } = await lookupGifs(parsed.id);
     if (!gifs.length) throw new Error("This post has no GIF.");
     const user = tweet.author?.screen_name || parsed.user;
-    const settings = loadSettings();
+    const settings = presetOptions(presetSelect.value);
 
     for (const [i, gif] of gifs.entries()) {
       const label = gifs.length > 1 ? ` ${i + 1}/${gifs.length}` : "";
@@ -141,6 +138,7 @@ async function run(text) {
     setStatus(err.message || String(err), true);
   } finally {
     goButton.disabled = false;
+    presetSelect.disabled = false;
     progressEl.hidden = true;
   }
 }
@@ -150,7 +148,7 @@ form.addEventListener("submit", (e) => {
   run(linkInput.value);
 });
 
-initSettings();
+initPreset();
 
 // Android share sheet lands here as ?title=…&text=…&url=… (see manifest share_target).
 const params = new URLSearchParams(location.search);

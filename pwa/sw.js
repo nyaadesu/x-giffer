@@ -1,6 +1,6 @@
 // Minimal app-shell cache so the PWA is installable and opens offline.
 // Network first, so updates show up immediately when online.
-const CACHE = "xgd-v1";
+const CACHE = "xgd-v2";
 const SHELL = [
   "./",
   "./index.html",
@@ -9,6 +9,8 @@ const SHELL = [
   "./icons/icon-192.png",
   "./icons/icon.svg",
   "../extension/converter.js",
+  "../extension/mp4.js",
+  "../extension/presets.js",
   "../extension/vendor/gifenc.js",
 ];
 
