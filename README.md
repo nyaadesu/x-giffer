@@ -59,13 +59,13 @@ steady, and files come out about 30% smaller.
 
 ## Android share shortcut (PWA)
 
-The PWA has to be served over HTTPS. The included workflow (`.github/workflows/pages.yml`)
-deploys it to GitHub Pages:
+It's hosted at **<https://nyaadesu.github.io/x-giffer/>**, deployed from `main` by
+`.github/workflows/pages.yml`. A fork can host its own copy by setting **Settings → Pages →
+Source** to **GitHub Actions**.
 
-1. Push this repo to GitHub and set **Settings → Pages → Source** to **GitHub Actions**.
-2. On your phone, open `https://<you>.github.io/<repo>/` in **Chrome** and choose
+1. On your phone, open <https://nyaadesu.github.io/x-giffer/> in **Chrome** and choose
    **⋮ → Add to Home screen → Install**.
-3. In the X app, open a post with a GIF and tap **Share → X Giffer**. The app opens, converts the
+2. In the X app, open a post with a GIF and tap **Share → X Giffer**. The app opens, converts the
    GIF, and offers **Share GIF** (to send it straight to another app) or **Save GIF**.
 
 You can also paste a post link into the app directly.
