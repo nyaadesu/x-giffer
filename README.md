@@ -66,9 +66,18 @@ Source** to **GitHub Actions**.
 1. On your phone, open <https://nyaadesu.github.io/x-giffer/> in **Chrome** and choose
    **⋮ → Add to Home screen → Install**.
 2. In the X app, open a post with a GIF and tap **Share → X Giffer**. The app opens, converts the
-   GIF, and offers **Share GIF** (to send it straight to another app) or **Save GIF**.
+   GIF with your chosen quality preset, and saves it to Downloads. **Share GIF** (to send it
+   straight to another app) and **Save GIF** are there too.
 
-You can also paste a post link into the app directly.
+You can also paste a post link into the app directly. Pasted links are never saved automatically.
+
+Settings in the app (remembered on the device):
+
+- **Quality** is used for every conversion, including shared posts.
+- **Save automatically when shared** is on by default. Turn it off to pick Share or Save yourself.
+- **Then close the app** closes the window once the GIF is saved, so a share drops you back in
+  the X app. The app still has to open while it converts: Android always opens a share target's
+  window, and a web app can't convert or save files in the background.
 
 Notes:
 

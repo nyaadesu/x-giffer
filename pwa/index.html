@@ -45,6 +45,9 @@
         flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; font: inherit;
         border: 1px solid var(--line); background: var(--card); color: var(--fg);
       }
+      label.toggle { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: var(--muted); }
+      label.toggle input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+      label.toggle:has(input:disabled) { opacity: 0.5; }
     </style>
   </head>
   <body>
@@ -57,6 +60,8 @@
         <button id="go" type="submit">Get GIF</button>
       </form>
       <label class="preset">Quality <select id="preset"></select></label>
+      <label class="toggle"><input id="autosave" type="checkbox" /> Save automatically when shared</label>
+      <label class="toggle"><input id="autoclose" type="checkbox" /> Then close the app</label>
       <div id="status"></div>
       <progress id="progress" hidden max="1" value="0"></progress>
       <div id="results"></div>
