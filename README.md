@@ -52,6 +52,11 @@ The converter reads the frame timestamps from the MP4, so it keeps the source's 
 durations instead of resampling. It also merges identical consecutive frames. GIFs can't play
 faster than 50 fps, so higher frame rates are thinned to fit.
 
+Colours come from a single palette built from samples of every frame, so gradients don't band
+differently from frame to frame. Pixels that haven't changed are left transparent so the previous
+frame shows through, and so are pixels that differ only by compression noise. Static areas stay
+steady, and files come out about 30% smaller.
+
 ## Android share shortcut (PWA)
 
 The PWA has to be served over HTTPS. The included workflow (`.github/workflows/pages.yml`)
