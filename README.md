@@ -33,11 +33,7 @@ Get the keys at <https://addons.mozilla.org/developers/addon/api/key/>, then ope
 writes to `web-ext-artifacts/` in Firefox. Alternatively, set `xpinstall.signatures.required` to
 `false` in Developer Edition, Nightly or ESR.
 
-**Publishing on addons.mozilla.org:** the listing text, reviewer notes, category and icon are
-in [`amo/`](amo/LISTING.md). To submit, upload the zip from `npx web-ext build -s extension` at
-<https://addons.mozilla.org/developers/addon/submit/>, or run
-`npx web-ext sign -s extension --channel listed --amo-metadata amo/metadata.json …`. The
-extension also runs on Firefox for Android (version 142 or newer).
+The extension also runs on Firefox for Android (version 142 or newer).
 
 Using it: hover a GIF on X and the **GIF** / **MP4** buttons appear in its top-right corner. The
 GIF button shows conversion progress, and the file lands in your Downloads folder as
