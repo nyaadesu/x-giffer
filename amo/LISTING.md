@@ -62,9 +62,17 @@ None needed: the add-on collects and transmits no user data (declared via
 
 ## Source code question
 
-"Do you need to submit source code?" → **No.** All extension code is plain, unminified
-JavaScript. The only minified file is a third-party library, included unmodified (see notes
-to reviewer).
+"Do you need to submit source code?" → **Yes**, because `vendor/gifenc.js` is minified. That's
+the unmodified upstream build, but AMO still asks. Upload a source zip that includes
+`SOURCE-README.txt` (below) at the top level:
+
+```sh
+git archive --format=zip --prefix=x-giffer-<version>/ --add-file=amo/SOURCE-README.txt \
+  -o web-ext-artifacts/x_giffer-<version>-source.zip HEAD
+```
+
+Building `extension/` from that zip with `npx web-ext build` reproduces the uploaded package
+file for file.
 
 ## Notes to reviewer
 
