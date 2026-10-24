@@ -1,7 +1,7 @@
 {
-  "name": "X GIF Downloader",
-  "short_name": "X GIF",
-  "description": "Share an X post here to save its GIF as a real .gif.",
+  "name": "X Giffer",
+  "short_name": "X Giffer",
+  "description": "Pronounced \"jiffer\". Share an X post here to save its GIF as a real .gif.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

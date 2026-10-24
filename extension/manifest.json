@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "X GIF Downloader",
+  "name": "X Giffer",
   "version": "1.1.0",
-  "description": "Adds GIF / MP4 download buttons to GIFs on X (Twitter). Conversion happens locally.",
+  "description": "Pronounced \"jiffer\". Adds GIF / MP4 download buttons to GIFs on X (Twitter). Conversion happens locally.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "x-gif-downloader@local",
+      "id": "x-giffer@local",
       "strict_min_version": "128.0",
       "data_collection_permissions": { "required": ["none"] }
     }

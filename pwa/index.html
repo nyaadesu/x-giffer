@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0f1419" />
-    <title>X GIF Downloader</title>
+    <title>X Giffer</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon.svg" />
     <style>
@@ -18,7 +18,8 @@
         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       }
       main { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
-      h1 { font-size: 20px; margin: 0 0 4px; }
+      h1 { font-size: 20px; margin: 0; }
+      p.tagline { margin: 0 0 8px; color: var(--muted); font-size: 13px; font-style: italic; }
       p.lead { color: var(--muted); margin: 0 0 16px; }
       form { display: flex; gap: 8px; }
       input[type="url"], input[type="text"] {
@@ -48,7 +49,8 @@
   </head>
   <body>
     <main>
-      <h1>X GIF Downloader</h1>
+      <h1>X Giffer</h1>
+      <p class="tagline">pronounced &ldquo;jiffer&rdquo;</p>
       <p class="lead">Share an X post to this app, or paste its link. Conversion runs on your device.</p>
       <form id="form">
         <input id="link" type="text" inputmode="url" placeholder="https://x.com/user/status/…" autocomplete="off" />

@@ -64,7 +64,7 @@ browser.runtime.onConnect.addListener((port) => {
       await handle(port, msg);
       port.postMessage({ type: "done" });
     } catch (err) {
-      console.error("[X GIF Downloader]", err);
+      console.error("[X Giffer]", err);
       try {
         port.postMessage({ type: "error", message: String(err?.message || err) });
       } catch {}

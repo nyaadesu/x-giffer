@@ -1,4 +1,6 @@
-# X GIF Downloader
+# X Giffer
+
+*pronounced "jiffer"*
 
 Save GIFs from X (Twitter) as real `.gif` files. X stores "GIFs" as silent MP4s
 (`video.twimg.com/tweet_video/<id>.mp4`). This project fetches that MP4 and converts it to an
@@ -58,7 +60,7 @@ deploys it to GitHub Pages:
 1. Push this repo to GitHub and set **Settings → Pages → Source** to **GitHub Actions**.
 2. On your phone, open `https://<you>.github.io/<repo>/` in **Chrome** and choose
    **⋮ → Add to Home screen → Install**.
-3. In the X app, open a post with a GIF and tap **Share → X GIF**. The app opens, converts the
+3. In the X app, open a post with a GIF and tap **Share → X Giffer**. The app opens, converts the
    GIF, and offers **Share GIF** (to send it straight to another app) or **Save GIF**.
 
 You can also paste a post link into the app directly.
