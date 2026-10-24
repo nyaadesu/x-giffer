@@ -1,9 +1,11 @@
-# X Giffer
+# <img src="extension/icons/icon.svg" width="40" alt=""> X Giffer
 
 *pronounced "jiffer"*
 
 **[Get X Giffer for Firefox](https://addons.mozilla.org/en-US/firefox/addon/x-giffer/)** (desktop and
 Android) · **[Open the Android share app](https://nyaadesu.github.io/x-giffer/)**
+
+![X Giffer adds GIF and MP4 buttons to GIFs on x.com and saves them as real .gif files](docs/screenshot.png)
 
 Save GIFs from X (Twitter) as real `.gif` files. X stores "GIFs" as silent MP4s
 (`video.twimg.com/tweet_video/<id>.mp4`). This project fetches that MP4 and converts it to an
