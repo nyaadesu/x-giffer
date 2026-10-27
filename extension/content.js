@@ -2,6 +2,7 @@
   const MARK = "xgdAttached";
   const SRC_RE = /video\.twimg\.com\/tweet_video\/([\w-]+)\.mp4/;
   const POSTER_RE = /pbs\.twimg\.com\/tweet_video_thumb\/([\w-]+)\./;
+  const VIDEO_POSTER_RE = /pbs\.twimg\.com\/(?:amplify_video_thumb|ext_tw_video_thumb)\/(\d+)\//;
 
   // X only uses /tweet_video/ for GIFs; real videos stream via blob: URLs
   // with amplify_video / ext_tw_video posters, so they never match here.
@@ -12,6 +13,13 @@
       if (m) return m[1];
     }
     const m = video.poster && video.poster.match(POSTER_RE);
+    return m ? m[1] : null;
+  }
+
+  // Real videos have no usable URL in the page; the background looks the
+  // post up and finds the video by the media ID in its poster.
+  function videoMediaId(video) {
+    const m = video.poster && video.poster.match(VIDEO_POSTER_RE);
     return m ? m[1] : null;
   }
 
@@ -35,7 +43,7 @@
     if (e.type === "click") e.preventDefault();
   }
 
-  function run(button, video, mediaId, format) {
+  function run(button, video, media, format) {
     if (button.disabled) return;
     const label = button.textContent;
     button.disabled = true;
@@ -65,11 +73,10 @@
     port.onDisconnect.addListener(() => {
       if (button.disabled && button.textContent !== "✓" && button.textContent !== "✗") reset("✗");
     });
-    port.postMessage({
-      url: `https://video.twimg.com/tweet_video/${mediaId}.mp4`,
-      basename: basenameFor(video, mediaId),
-      format,
-    });
+    const source = media.gif
+      ? { url: `https://video.twimg.com/tweet_video/${media.gif}.mp4` }
+      : { tweetId: tweetInfo(video)?.id, mediaId: media.video };
+    port.postMessage({ ...source, basename: basenameFor(video, media.gif || media.video), format });
   }
 
   function makeButton(text, title, onClick) {
@@ -90,9 +97,11 @@
 
   function attach(video) {
     if (video.dataset[MARK]) return;
-    const mediaId = gifMediaId(video);
-    if (!mediaId) return;
+    const gif = gifMediaId(video);
+    const media = gif ? { gif } : { video: videoMediaId(video) };
+    if (!media.gif && !media.video) return;
     video.dataset[MARK] = "1";
+    const kind = media.gif ? "GIF" : "video";
 
     const host = video.closest('[data-testid="videoPlayer"]') || video.parentElement;
     if (getComputedStyle(host).position === "static") host.style.position = "relative";
@@ -100,8 +109,8 @@
     const bar = document.createElement("div");
     bar.className = "xgd-bar";
     bar.append(
-      makeButton("GIF", "Download as GIF", (b) => run(b, video, mediaId, "gif")),
-      makeButton("MP4", "Download original MP4", (b) => run(b, video, mediaId, "mp4")),
+      makeButton("GIF", `Download ${kind} as GIF`, (b) => run(b, video, media, "gif")),
+      makeButton("MP4", `Download ${kind} as MP4`, (b) => run(b, video, media, "mp4")),
     );
     host.append(bar);
   }

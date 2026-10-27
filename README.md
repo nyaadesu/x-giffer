@@ -11,14 +11,15 @@ Save GIFs from X (Twitter) as real `.gif` files. X stores "GIFs" as silent MP4s
 (`video.twimg.com/tweet_video/<id>.mp4`). This project fetches that MP4 and converts it to an
 animated GIF on your own device: it steps through the video frame by frame onto a canvas and
 encodes the frames with [gifenc](https://github.com/mattdesl/gifenc). No third-party conversion
-service is involved.
+service is involved. Short videos (up to 60 seconds) can be turned into GIFs the same way, and
+any video can be saved as an MP4.
 
 It has two parts that share `extension/converter.js`:
 
 | Part | What it does |
 | --- | --- |
-| `extension/` | Firefox extension. Adds **GIF** and **MP4** buttons to every GIF on x.com. |
-| `pwa/` | Small web app for Android. Share an X post to it and it gives you back the GIF. |
+| `extension/` | Firefox extension. Adds **GIF** and **MP4** buttons to every GIF and video on x.com. |
+| `pwa/` | Small web app for Android. Share an X post to it and it gives you back the GIF. Short videos work too. |
 
 ## Firefox extension
 
@@ -44,9 +45,10 @@ Get the keys at <https://addons.mozilla.org/developers/addon/api/key/>, then ope
 writes to `web-ext-artifacts/` in Firefox. Alternatively, set `xpinstall.signatures.required` to
 `false` in Developer Edition, Nightly or ESR.
 
-Using it: hover a GIF on X and the **GIF** / **MP4** buttons appear in its top-right corner. The
-GIF button shows conversion progress, and the file lands in your Downloads folder as
-`<user>_<postid>.gif`.
+Using it: hover a GIF or video on X and the **GIF** / **MP4** buttons appear in its top-right
+corner. The GIF button shows conversion progress, and the file lands in your Downloads folder as
+`<user>_<postid>.gif`. For videos, **MP4** saves the best quality X has, and **GIF** works for
+videos up to 60 seconds long (hover the ✗ to see why one failed).
 
 ### Quality presets
 
@@ -76,7 +78,7 @@ Source** to **GitHub Actions**.
 
 1. On your phone, open <https://nyaadesu.github.io/x-giffer/> in **Chrome** and choose
    **⋮ → Add to Home screen → Install**.
-2. In the X app, open a post with a GIF and tap **Share → X Giffer**. The app opens, converts the
+2. In the X app, open a post with a GIF or a short video and tap **Share → X Giffer**. The app opens, converts the
    GIF with your chosen quality preset, and saves it to Downloads. **Share GIF** (to send it
    straight to another app) and **Save GIF** are there too.
 
@@ -105,8 +107,12 @@ Notes:
   `referrerPolicy: "no-referrer"`.
 - In the extension, the conversion runs in the background page (Firefox background pages have
   a DOM), so it isn't affected by x.com's CSP and doesn't slow down the tab.
-- Real X *videos* are streamed through MSE (`blob:` URLs) and don't use `/tweet_video/`, so
-  the buttons only appear on GIFs.
+- Real X *videos* are streamed through MSE (`blob:` URLs), so the page never shows their MP4
+  URL. The extension reads the media ID from the video's poster and looks the post up on X's
+  own embed API (`cdn.syndication.twimg.com`, the endpoint embedded posts use) to find the MP4
+  versions X keeps. For a GIF it picks the smallest one that is at least as wide as the quality
+  preset, so less has to be downloaded. Posts that X won't embed (age-restricted or private)
+  can't be fetched this way.
 
 ## License
 

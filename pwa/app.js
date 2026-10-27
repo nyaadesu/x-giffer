@@ -1,5 +1,6 @@
 import { mp4ToGif } from "../extension/converter.js";
 import { DEFAULT_PRESET, fillPresetSelect, presetOptions } from "../extension/presets.js";
+import { checkGifLength, MAX_GIF_SECONDS, pickVariant } from "../extension/video.js";
 
 const STATUS_RE = /(?:x|twitter|fxtwitter|fixupx|vxtwitter)\.com\/(?:([\w]+)\/status|i\/status|i\/web\/status)\/(\d+)/i;
 
@@ -62,18 +63,35 @@ function parseStatus(text) {
 }
 
 // fxtwitter's public API is CORS-enabled and resolves a status ID to its media.
-async function lookupGifs(id) {
+// Returns the post's GIFs and short videos as [{ url, mp4Url }]: `url` is what
+// to convert, `mp4Url` the best version for the "Original MP4" link.
+async function lookupMedia(id, maxWidth) {
   const res = await fetch(`https://api.fxtwitter.com/status/${id}`);
   if (!res.ok) throw new Error(`Couldn't load the post (HTTP ${res.status})`);
   const { tweet } = await res.json();
   if (!tweet) throw new Error("Post not found");
   // X serves GIFs from /tweet_video/; match on that as well as the type label.
   const isGif = (v) => v.type === "gif" || v.type === "animated_gif" || /\/tweet_video\//.test(v.url || "");
-  const collect = (t) => [...(t?.media?.videos || []), ...(t?.media?.all || [])].filter(isGif);
-  const gifs = [...collect(tweet), ...collect(tweet.quote)];
+  const isVideo = (v) => v.type === "video" && v.url;
+  const collect = (t) => [...(t?.media?.videos || []), ...(t?.media?.all || [])].filter((v) => isGif(v) || isVideo(v));
   // media.all and media.videos can overlap; dedupe by URL.
-  const unique = [...new Map(gifs.map((g) => [g.url, g])).values()];
-  return { tweet, gifs: unique };
+  const found = [...new Map([...collect(tweet), ...collect(tweet.quote)].map((v) => [v.url, v])).values()];
+
+  const media = [];
+  let tooLong = 0;
+  for (const v of found) {
+    if (isGif(v)) {
+      media.push({ url: v.url, mp4Url: v.url });
+    } else if (v.duration > MAX_GIF_SECONDS) {
+      tooLong = Math.max(tooLong, v.duration);
+    } else {
+      const variants = (v.formats || []).filter((f) => f.container === "mp4");
+      if (!variants.length) variants.push({ url: v.url });
+      media.push({ url: pickVariant(variants, maxWidth).url, mp4Url: pickVariant(variants).url });
+    }
+  }
+  if (!media.length && tooLong) checkGifLength(tooLong);
+  return { tweet, media };
 }
 
 function renderResult(file, mp4Url) {
@@ -132,10 +150,10 @@ async function run(text, { shared = false } = {}) {
 
   try {
     setStatus("Looking up post…");
-    const { tweet, gifs } = await lookupGifs(parsed.id);
-    if (!gifs.length) throw new Error("This post has no GIF.");
-    const user = tweet.author?.screen_name || parsed.user;
     const settings = presetOptions(presetSelect.value);
+    const { tweet, media: gifs } = await lookupMedia(parsed.id, settings.maxWidth);
+    if (!gifs.length) throw new Error("This post has no GIF or video.");
+    const user = tweet.author?.screen_name || parsed.user;
     const saves = [];
 
     for (const [i, gif] of gifs.entries()) {
@@ -143,7 +161,7 @@ async function run(text, { shared = false } = {}) {
       setStatus(`Downloading${label}…`);
       // video.twimg.com 403s any non-X Referer, so send none.
       const res = await fetch(gif.url, { referrerPolicy: "no-referrer" });
-      if (!res.ok) throw new Error(`Couldn't download the GIF video (HTTP ${res.status})`);
+      if (!res.ok) throw new Error(`Couldn't download the video (HTTP ${res.status})`);
       const mp4 = await res.blob();
 
       setStatus(`Converting${label}…`);
@@ -151,7 +169,7 @@ async function run(text, { shared = false } = {}) {
       progressEl.value = 0;
       const blob = await mp4ToGif(mp4, settings, (v) => (progressEl.value = v));
       const suffix = gifs.length > 1 ? `_${i + 1}` : "";
-      saves.push(renderResult(new File([blob], `${user}_${tweet.id}${suffix}.gif`, { type: "image/gif" }), gif.url));
+      saves.push(renderResult(new File([blob], `${user}_${tweet.id}${suffix}.gif`, { type: "image/gif" }), gif.mp4Url));
     }
     if (shared && autosaveBox.checked) {
       for (const save of saves) save.click();

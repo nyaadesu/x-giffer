@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "X Giffer",
   "version": "1.3.2",
-  "description": "Pronounced \"jiffer\". Adds GIF / MP4 download buttons to GIFs on X (Twitter). Conversion happens locally.",
+  "description": "Pronounced \"jiffer\". Adds GIF / MP4 download buttons to GIFs and videos on X (Twitter). Conversion happens locally.",
   "homepage_url": "https://github.com/nyaadesu/x-giffer",
   "browser_specific_settings": {
     "gecko": {
@@ -16,7 +16,7 @@
   },
   "icons": { "48": "icons/icon.svg", "96": "icons/icon.svg" },
   "permissions": ["downloads", "storage"],
-  "host_permissions": ["https://video.twimg.com/*"],
+  "host_permissions": ["https://video.twimg.com/*", "https://cdn.syndication.twimg.com/*"],
   "background": {
     "scripts": ["background.js"],
     "type": "module"
