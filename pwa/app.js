@@ -97,13 +97,23 @@ async function lookupMedia(id, settings) {
     }
   }
   if (!media.length && tooLong) checkGifLength(tooLong);
-  return { tweet, media };
+  return { tweet, media, skipped: found.length - media.length };
+}
+
+// Object URLs of the GIFs on screen, freed when the next conversion starts.
+let resultUrls = [];
+
+function clearResults() {
+  resultUrls.forEach((u) => URL.revokeObjectURL(u));
+  resultUrls = [];
+  resultsEl.replaceChildren();
 }
 
 function renderResult(file, mp4Url) {
   const card = document.createElement("div");
   card.className = "result";
   const url = URL.createObjectURL(file);
+  resultUrls.push(url);
 
   const img = document.createElement("img");
   img.src = url;
@@ -151,16 +161,17 @@ async function run(text, { shared = false } = {}) {
   lastLink = text;
   goButton.disabled = true;
   presetSelect.disabled = true;
-  resultsEl.replaceChildren();
+  clearResults();
   progressEl.hidden = true;
 
   try {
     setStatus("Looking up post…");
     const settings = presetOptions(presetSelect.value);
-    const { tweet, media: gifs } = await lookupMedia(parsed.id, settings);
+    const { tweet, media: gifs, skipped } = await lookupMedia(parsed.id, settings);
     if (!gifs.length) throw new Error("This post has no GIF or video.");
     const user = tweet.author?.screen_name || parsed.user;
     const saves = [];
+    let bytes = 0;
 
     for (const [i, gif] of gifs.entries()) {
       const label = gifs.length > 1 ? ` ${i + 1}/${gifs.length}` : "";
@@ -176,22 +187,33 @@ async function run(text, { shared = false } = {}) {
       const blob = await mp4ToGif(mp4, gif.settings, (v) => (progressEl.value = v));
       const suffix = gifs.length > 1 ? `_${i + 1}` : "";
       saves.push(renderResult(new File([blob], `${user}_${tweet.id}${suffix}.gif`, { type: "image/gif" }), gif.mp4Url));
+      bytes += blob.size;
     }
+    const note = skipped ? ` Skipped ${skipped} video${skipped > 1 ? "s" : ""} over ${MAX_GIF_SECONDS}s.` : "";
     if (shared && autosaveBox.checked) {
       for (const save of saves) save.click();
-      if (autocloseBox.checked) {
-        setStatus("Saved to Downloads. Closing…");
-        // Give the download a moment to read the blob before the page goes away.
-        // window.close() is allowed here because a share launch has one history entry.
+      if (saves.length > 1) {
+        // Chrome asks before a page saves several files at once, and closing
+        // would dismiss that prompt, so stay open.
+        setStatus(
+          `Saved ${saves.length} GIFs. If Chrome asks about downloading multiple files, allow it, ` +
+            `or tap Save GIF on any that are missing.${note}`,
+        );
+      } else if (autocloseBox.checked) {
+        setStatus(`Saved to Downloads. Closing…${note}`);
+        // Give the download time to read the blob before the page goes away,
+        // longer for big files. window.close() is allowed here because a
+        // share launch has one history entry.
+        const wait = Math.min(10_000, 1500 + (bytes / 1024 / 1024) * 100);
         setTimeout(() => {
           window.close();
-          setStatus("Saved to Downloads.");
-        }, 1500);
+          setStatus(`Saved to Downloads.${note}`);
+        }, wait);
       } else {
-        setStatus("Saved to Downloads.");
+        setStatus(`Saved to Downloads.${note}`);
       }
     } else {
-      setStatus("Done.");
+      setStatus(`Done.${note}`);
     }
   } catch (err) {
     console.error(err);

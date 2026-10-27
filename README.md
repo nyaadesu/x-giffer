@@ -93,7 +93,9 @@ Settings in the app (remembered on the device):
 - **Save automatically when shared** is on by default. Turn it off to pick Share or Save yourself.
 - **Then close the app** closes the window once the GIF is saved, so a share drops you back in
   the X app. The app still has to open while it converts: Android always opens a share target's
-  window, and a web app can't convert or save files in the background.
+  window, and a web app can't convert or save files in the background. A post with several GIFs
+  keeps the app open: Chrome asks before a site saves multiple files at once (allow it once and
+  it remembers), and closing would dismiss that prompt.
 
 Notes:
 

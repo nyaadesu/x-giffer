@@ -36,8 +36,11 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(e.request)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(key, copy));
+        // Don't let a 404 or 500 (say, mid-deploy) replace the offline copy.
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(key, copy));
+        }
         return res;
       })
       .catch(() => caches.match(key)),
