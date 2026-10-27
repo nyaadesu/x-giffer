@@ -10,6 +10,9 @@ const PALETTE_SAMPLE = 4_000_000;
 // Keep decoded frames in memory between passes up to this size; beyond it
 // they are decoded again instead.
 const FRAME_CACHE_BYTES = 256 * 1024 * 1024;
+// Without the cache every frame is decoded twice, so the palette pass only
+// samples this many frames spread across the clip instead of all of them.
+const PALETTE_FRAMES = 60;
 // Squared RGB distance below which a pixel counts as unchanged from what is
 // already on screen, so video compression noise doesn't shimmer.
 const NOISE_THRESHOLD = 3 * 4 * 4;
@@ -52,9 +55,10 @@ function planFrames(timing, maxFps) {
 /**
  * Convert an MP4 blob into an animated GIF blob, keeping the source frames
  * and their timing. Options: maxFps (0 = source), maxWidth (0 = original),
- * colors (2-256 per frame).
+ * colors (2-256 per frame), maxPixels (width × height × frames budget,
+ * 0 = none; the GIF is scaled down to fit).
  */
-export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256 }, onProgress = () => {}) {
+export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256, maxPixels = 0 }, onProgress = () => {}) {
   const url = URL.createObjectURL(mp4Blob);
   const video = document.createElement("video");
   video.muted = true;
@@ -77,7 +81,9 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
     const end = Math.min(timing.duration, duration);
     const plan = planFrames({ times: timing.times, duration: end }, maxFps);
 
-    const scale = maxWidth > 0 && video.videoWidth > maxWidth ? maxWidth / video.videoWidth : 1;
+    let scale = maxWidth > 0 && video.videoWidth > maxWidth ? maxWidth / video.videoWidth : 1;
+    const total = video.videoWidth * video.videoHeight * scale * scale * plan.length;
+    if (maxPixels > 0 && total > maxPixels) scale *= Math.sqrt(maxPixels / total);
     const width = Math.max(1, Math.round(video.videoWidth * scale));
     const height = Math.max(1, Math.round(video.videoHeight * scale));
 
@@ -94,22 +100,27 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
       return ctx.getImageData(0, 0, width, height).data;
     };
 
-    // Pass 1: decode every frame and sample its pixels for one palette shared
-    // by the whole GIF. Per-frame palettes make gradients band differently on
-    // every frame, which shows up as shimmering colours.
+    // Pass 1: decode frames and sample their pixels for one palette shared by
+    // the whole GIF. Per-frame palettes make gradients band differently on
+    // every frame, which shows up as shimmering colours. If the frames fit in
+    // the cache, decode all of them now; otherwise just a spread of them.
     const pixels = width * height;
-    const stride = Math.max(1, Math.ceil((pixels * plan.length) / PALETTE_SAMPLE));
-    const sample = new Uint32Array(Math.ceil(pixels / stride) * plan.length);
-    let sampled = 0;
     const cacheFrames = pixels * 4 * plan.length <= FRAME_CACHE_BYTES;
+    const count = cacheFrames ? plan.length : Math.min(plan.length, PALETTE_FRAMES);
+    const picks = Array.from({ length: count }, (_, j) => Math.floor(((j + 0.5) * plan.length) / count));
+    // Share of the progress bar for pass 1, by how many frames each pass decodes.
+    const split = cacheFrames ? 0.5 : count / (count + plan.length);
+    const stride = Math.max(1, Math.ceil((pixels * count) / PALETTE_SAMPLE));
+    const sample = new Uint32Array(Math.ceil(pixels / stride) * count);
+    let sampled = 0;
     const frames = [];
-    for (let i = 0; i < plan.length; i++) {
+    for (const [j, i] of picks.entries()) {
       const data = await grab(plan[i]);
       if (cacheFrames) frames.push(data);
       const px = new Uint32Array(data.buffer);
       // Offset the start per frame so sampling doesn't always hit the same pixels.
-      for (let p = i % stride; p < px.length; p += stride) sample[sampled++] = px[p];
-      onProgress((0.5 * (i + 1)) / plan.length);
+      for (let p = j % stride; p < px.length; p += stride) sample[sampled++] = px[p];
+      onProgress((split * (j + 1)) / count);
     }
 
     // The last palette slot is reserved for "unchanged since last frame".
@@ -171,7 +182,7 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
         flush();
         pending = { index, first: !pending, start: plan[i].start, end: frameEnd };
       }
-      onProgress(0.5 + (0.5 * (i + 1)) / plan.length);
+      onProgress(split + ((1 - split) * (i + 1)) / plan.length);
     }
     flush();
 

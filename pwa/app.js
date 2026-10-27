@@ -1,6 +1,6 @@
 import { mp4ToGif } from "../extension/converter.js";
 import { DEFAULT_PRESET, fillPresetSelect, presetOptions } from "../extension/presets.js";
-import { checkGifLength, MAX_GIF_SECONDS, pickVariant } from "../extension/video.js";
+import { checkGifLength, MAX_GIF_SECONDS, pickVariant, videoGifSettings } from "../extension/video.js";
 
 const STATUS_RE = /(?:x|twitter|fxtwitter|fixupx|vxtwitter)\.com\/(?:([\w]+)\/status|i\/status|i\/web\/status)\/(\d+)/i;
 
@@ -63,9 +63,10 @@ function parseStatus(text) {
 }
 
 // fxtwitter's public API is CORS-enabled and resolves a status ID to its media.
-// Returns the post's GIFs and short videos as [{ url, mp4Url }]: `url` is what
-// to convert, `mp4Url` the best version for the "Original MP4" link.
-async function lookupMedia(id, maxWidth) {
+// Returns the post's GIFs and short videos as [{ url, mp4Url, settings }]:
+// `url` is what to convert and with which settings, `mp4Url` the best version
+// for the "Original MP4" link.
+async function lookupMedia(id, settings) {
   const res = await fetch(`https://api.fxtwitter.com/status/${id}`);
   if (!res.ok) throw new Error(`Couldn't load the post (HTTP ${res.status})`);
   const { tweet } = await res.json();
@@ -81,13 +82,18 @@ async function lookupMedia(id, maxWidth) {
   let tooLong = 0;
   for (const v of found) {
     if (isGif(v)) {
-      media.push({ url: v.url, mp4Url: v.url });
+      media.push({ url: v.url, mp4Url: v.url, settings });
     } else if (v.duration > MAX_GIF_SECONDS) {
       tooLong = Math.max(tooLong, v.duration);
     } else {
       const variants = (v.formats || []).filter((f) => f.container === "mp4");
       if (!variants.length) variants.push({ url: v.url });
-      media.push({ url: pickVariant(variants, maxWidth).url, mp4Url: pickVariant(variants).url });
+      const videoSettings = videoGifSettings(variants, v.duration, settings);
+      media.push({
+        url: pickVariant(variants, videoSettings.maxWidth).url,
+        mp4Url: pickVariant(variants).url,
+        settings: videoSettings,
+      });
     }
   }
   if (!media.length && tooLong) checkGifLength(tooLong);
@@ -151,7 +157,7 @@ async function run(text, { shared = false } = {}) {
   try {
     setStatus("Looking up post…");
     const settings = presetOptions(presetSelect.value);
-    const { tweet, media: gifs } = await lookupMedia(parsed.id, settings.maxWidth);
+    const { tweet, media: gifs } = await lookupMedia(parsed.id, settings);
     if (!gifs.length) throw new Error("This post has no GIF or video.");
     const user = tweet.author?.screen_name || parsed.user;
     const saves = [];
@@ -167,7 +173,7 @@ async function run(text, { shared = false } = {}) {
       setStatus(`Converting${label}…`);
       progressEl.hidden = false;
       progressEl.value = 0;
-      const blob = await mp4ToGif(mp4, settings, (v) => (progressEl.value = v));
+      const blob = await mp4ToGif(mp4, gif.settings, (v) => (progressEl.value = v));
       const suffix = gifs.length > 1 ? `_${i + 1}` : "";
       saves.push(renderResult(new File([blob], `${user}_${tweet.id}${suffix}.gif`, { type: "image/gif" }), gif.mp4Url));
     }

@@ -1,6 +1,6 @@
 import { mp4ToGif } from "./converter.js";
 import { loadSettings } from "./settings.js";
-import { checkGifLength, pickVariant } from "./video.js";
+import { checkGifLength, pickVariant, videoGifSettings } from "./video.js";
 
 const MP4_URL = /^https:\/\/video\.twimg\.com\/tweet_video\/[\w-]+\.mp4(\?.*)?$/;
 const VIDEO_URL = /^https:\/\/video\.twimg\.com\/(?:amplify_video|ext_tw_video)\/\d+\/[\w/-]+\.mp4(\?.*)?$/;
@@ -64,16 +64,28 @@ async function lookupVideo(tweetId, mediaId) {
 }
 
 async function handle(port, { url, tweetId, mediaId, basename, format }) {
-  const settingsPromise = loadSettings();
-  if (tweetId) {
+  let settings = format === "mp4" ? null : await loadSettings();
+  if (mediaId) {
     if (!/^\d+$/.test(tweetId) || !/^\d+$/.test(mediaId)) throw new Error("couldn't tell which post this video is from");
-    const [{ variants, seconds }, settings] = await Promise.all([lookupVideo(tweetId, mediaId), settingsPromise]);
-    if (format !== "mp4") checkGifLength(seconds);
-    url = pickVariant(variants, format === "mp4" ? 0 : settings.maxWidth).url;
+    const { variants, seconds } = await lookupVideo(tweetId, mediaId);
+    if (settings) {
+      checkGifLength(seconds);
+      settings = videoGifSettings(variants, seconds, settings);
+    }
+    url = pickVariant(variants, settings?.maxWidth ?? 0).url;
     if (!VIDEO_URL.test(url)) throw new Error("unexpected video url");
   } else if (!MP4_URL.test(url)) {
     throw new Error("not a twitter GIF url");
   }
+
+  if (format === "mp4") {
+    // Let Firefox stream it to disk with its own progress, rather than holding
+    // the whole video in memory here. Extension downloads send no Referer,
+    // which is what video.twimg.com needs.
+    await browser.downloads.download({ url, filename: `${basename}.mp4`, conflictAction: "uniquify" });
+    return;
+  }
+
   const send = (msg) => {
     try {
       port.postMessage(msg);
@@ -81,15 +93,8 @@ async function handle(port, { url, tweetId, mediaId, basename, format }) {
       // Tab navigated away; keep going so the download still lands.
     }
   };
-
-  if (format === "mp4") {
-    const blob = await fetchMp4(url);
-    await saveBlob(blob, `${basename}.mp4`);
-    return;
-  }
-
   send({ type: "progress", stage: "fetch", value: 0 });
-  const [blob, settings] = await Promise.all([fetchMp4(url), settingsPromise]);
+  const blob = await fetchMp4(url);
   const gif = await mp4ToGif(blob, settings, (value) => send({ type: "progress", stage: "encode", value }));
   await saveBlob(gif, `${basename}.gif`);
 }

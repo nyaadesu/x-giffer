@@ -48,7 +48,10 @@ writes to `web-ext-artifacts/` in Firefox. Alternatively, set `xpinstall.signatu
 Using it: hover a GIF or video on X and the **GIF** / **MP4** buttons appear in its top-right
 corner. The GIF button shows conversion progress, and the file lands in your Downloads folder as
 `<user>_<postid>.gif`. For videos, **MP4** saves the best quality X has, and **GIF** works for
-videos up to 60 seconds long (hover the ✗ to see why one failed).
+videos up to 60 seconds long (hover the ✗ to see why one failed). A GIF made from a video is
+also kept to about 200 million pixels in total (width × height × frames). That's roughly
+1100 px wide for a 10-second clip, or 440 px for a minute, whatever the preset says. Real footage
+barely compresses as a GIF: a 9-second 1080p clip at full size comes to over 200 MB.
 
 ### Quality presets
 
