@@ -1,5 +1,5 @@
 import { GIFEncoder, quantize, applyPalette } from "./vendor/gifenc.js";
-import { frameTimes } from "./mp4.js";
+import { frameTimes, videoSamples } from "./mp4.js";
 
 // GIF delays are whole centiseconds and browsers bump anything under 2cs to
 // 10cs, so 50fps is the fastest a GIF can really play.
@@ -16,6 +16,8 @@ const PALETTE_FRAMES = 60;
 // Squared RGB distance below which a pixel counts as unchanged from what is
 // already on screen, so video compression noise doesn't shimmer.
 const NOISE_THRESHOLD = 3 * 4 * 4;
+// Encoded chunks queued in the WebCodecs decoder before waiting for it.
+const DECODE_AHEAD = 8;
 
 function once(target, event, errorEvent = "error") {
   return new Promise((resolve, reject) => {
@@ -52,21 +54,100 @@ function planFrames(timing, maxFps) {
   return plan;
 }
 
+// A frame source opens the MP4 and reads frames out of it as RGBA pixels:
+// { width, height, timing, read(frames, draw), close() }. read() takes plan
+// entries in increasing order and yields draw(image) for each one.
+
+// WebCodecs failed while decoding, so mp4ToGif retries with a <video>.
+class DecodeError extends Error {}
+
 /**
- * Convert an MP4 blob into an animated GIF blob, keeping the source frames
- * and their timing. Options: maxFps (0 = source), maxWidth (0 = original),
- * colors (2-256 per frame), maxPixels (width × height × frames budget,
- * 0 = none; the GIF is scaled down to fit).
+ * Decode with WebCodecs. Firefox on macOS can't decode a <video> in an
+ * extension's background page at all ("Expected Planar YCbCr image"), and
+ * this also skips the seeking. Null if the browser or the file isn't supported.
  */
-export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256, maxPixels = 0 }, onProgress = () => {}) {
+async function webCodecsSource(buffer) {
+  if (typeof VideoDecoder === "undefined") return null;
+  const track = videoSamples(buffer);
+  const timing = track && frameTimes(buffer);
+  if (!timing) return null;
+  const { config, samples } = track;
+  try {
+    if (!(await VideoDecoder.isConfigSupported(config)).supported) return null;
+  } catch {
+    return null;
+  }
+  const micros = (seconds) => Math.round(seconds * 1e6);
+
+  async function* read(frames, draw) {
+    // Decode everything in order and keep the frames the plan asks for.
+    const wanted = frames.map((f) => micros(f.start));
+    const ready = [];
+    let next = 0;
+    let failure = null;
+    let wake = null;
+    const notify = () => wake?.();
+    const decoder = new VideoDecoder({
+      output: (frame) => {
+        if (frame.timestamp === wanted[next]) {
+          ready.push(draw(frame));
+          next++;
+        }
+        frame.close();
+        notify();
+      },
+      error: (err) => {
+        failure = err;
+        notify();
+      },
+    });
+    decoder.addEventListener("dequeue", notify);
+    try {
+      decoder.configure(config);
+      for (const sample of samples) {
+        if (failure || next === wanted.length) break;
+        decoder.decode(
+          new EncodedVideoChunk({
+            type: sample.key ? "key" : "delta",
+            timestamp: micros(sample.time),
+            data: new Uint8Array(buffer, sample.offset, sample.size),
+          }),
+        );
+        while (ready.length) yield ready.shift();
+        while (!failure && decoder.decodeQueueSize > DECODE_AHEAD) {
+          await new Promise((resolve) => (wake = resolve));
+          wake = null;
+        }
+      }
+      if (!failure && next < wanted.length) await decoder.flush();
+      if (failure) throw new DecodeError(`video decode failed: ${failure.message || failure}`);
+      while (ready.length) yield ready.shift();
+      if (next < wanted.length) throw new DecodeError("video decode skipped frames");
+    } catch (err) {
+      throw err instanceof DecodeError ? err : new DecodeError(`video decode failed: ${err?.message || err}`);
+    } finally {
+      if (decoder.state !== "closed") decoder.close();
+    }
+  }
+
+  return { width: track.width, height: track.height, timing, read, close() {} };
+}
+
+/** Play the MP4 in a <video> element and seek to each frame. */
+async function videoSource(mp4Blob, buffer) {
   const url = URL.createObjectURL(mp4Blob);
   const video = document.createElement("video");
   video.muted = true;
   video.preload = "auto";
   video.src = url;
+  const close = () => {
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(url);
+  };
 
   try {
-    const [buffer] = await Promise.all([mp4Blob.arrayBuffer(), once(video, "loadeddata")]);
+    await once(video, "loadeddata");
 
     const duration = video.duration;
     if (!Number.isFinite(duration) || duration <= 0) {
@@ -78,14 +159,62 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
       const n = Math.max(1, Math.round(duration * FALLBACK_FPS));
       timing = { times: Array.from({ length: n }, (_, i) => i / FALLBACK_FPS), duration };
     }
-    const end = Math.min(timing.duration, duration);
-    const plan = planFrames({ times: timing.times, duration: end }, maxFps);
 
-    let scale = maxWidth > 0 && video.videoWidth > maxWidth ? maxWidth / video.videoWidth : 1;
-    const total = video.videoWidth * video.videoHeight * scale * scale * plan.length;
+    async function* read(frames, draw) {
+      for (const frame of frames) {
+        video.currentTime = frame.seek;
+        await once(video, "seeked");
+        yield draw(video);
+      }
+    }
+
+    return {
+      width: video.videoWidth,
+      height: video.videoHeight,
+      timing: { times: timing.times, duration: Math.min(timing.duration, duration) },
+      read,
+      close,
+    };
+  } catch (err) {
+    close();
+    throw err;
+  }
+}
+
+/**
+ * Convert an MP4 blob into an animated GIF blob, keeping the source frames
+ * and their timing. Options: maxFps (0 = source), maxWidth (0 = original),
+ * colors (2-256 per frame), maxPixels (width × height × frames budget,
+ * 0 = none; the GIF is scaled down to fit).
+ */
+export async function mp4ToGif(mp4Blob, options, onProgress = () => {}) {
+  const buffer = await mp4Blob.arrayBuffer();
+  const fast = await webCodecsSource(buffer);
+  if (fast) {
+    try {
+      return await encode(fast, options, onProgress);
+    } catch (err) {
+      // A browser can claim support and still fail partway; start over the slow way.
+      if (!(err instanceof DecodeError)) throw err;
+      console.warn("[X Giffer] WebCodecs failed, retrying with <video>:", err);
+      onProgress(0);
+    }
+  }
+  return encode(await videoSource(mp4Blob, buffer), options, onProgress);
+}
+
+async function encode(source, { maxFps = 0, maxWidth = 0, colors = 256, maxPixels = 0 }, onProgress) {
+  let rest = null;
+
+  try {
+    const end = source.timing.duration;
+    const plan = planFrames(source.timing, maxFps);
+
+    let scale = maxWidth > 0 && source.width > maxWidth ? maxWidth / source.width : 1;
+    const total = source.width * source.height * scale * scale * plan.length;
     if (maxPixels > 0 && total > maxPixels) scale *= Math.sqrt(maxPixels / total);
-    const width = Math.max(1, Math.round(video.videoWidth * scale));
-    const height = Math.max(1, Math.round(video.videoHeight * scale));
+    const width = Math.max(1, Math.round(source.width * scale));
+    const height = Math.max(1, Math.round(source.height * scale));
 
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -93,10 +222,8 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     ctx.imageSmoothingQuality = "high";
 
-    const grab = async (frame) => {
-      video.currentTime = frame.seek;
-      await once(video, "seeked");
-      ctx.drawImage(video, 0, 0, width, height);
+    const draw = (image) => {
+      ctx.drawImage(image, 0, 0, width, height);
       return ctx.getImageData(0, 0, width, height).data;
     };
 
@@ -114,13 +241,13 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
     const sample = new Uint32Array(Math.ceil(pixels / stride) * count);
     let sampled = 0;
     const frames = [];
-    for (const [j, i] of picks.entries()) {
-      const data = await grab(plan[i]);
+    let j = 0;
+    for await (const data of source.read(picks.map((i) => plan[i]), draw)) {
       if (cacheFrames) frames.push(data);
       const px = new Uint32Array(data.buffer);
       // Offset the start per frame so sampling doesn't always hit the same pixels.
       for (let p = j % stride; p < px.length; p += stride) sample[sampled++] = px[p];
-      onProgress((split * (j + 1)) / count);
+      onProgress((split * ++j) / count);
     }
 
     // The last palette slot is reserved for "unchanged since last frame".
@@ -131,6 +258,7 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
     // Pass 2: map each frame onto the palette. Pixels that are unchanged (or
     // only differ by compression noise) are left transparent so the previous
     // frame shows through: no shimmer on static areas and much smaller files.
+    rest = cacheFrames ? null : source.read(plan, draw);
     const gif = GIFEncoder();
     const shown = new Int16Array(pixels).fill(-1);
     let pending = null;
@@ -150,7 +278,7 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
 
     for (let i = 0; i < plan.length; i++) {
       const frameEnd = plan[i + 1]?.start ?? end;
-      const data = cacheFrames ? frames[i] : await grab(plan[i]);
+      const data = cacheFrames ? frames[i] : (await rest.next()).value;
       if (cacheFrames) frames[i] = null;
       const index = applyPalette(data, palette);
 
@@ -189,8 +317,7 @@ export async function mp4ToGif(mp4Blob, { maxFps = 0, maxWidth = 0, colors = 256
     gif.finish();
     return new Blob([gif.bytesView()], { type: "image/gif" });
   } finally {
-    video.removeAttribute("src");
-    video.load();
-    URL.revokeObjectURL(url);
+    await rest?.return();
+    source.close();
   }
 }
