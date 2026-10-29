@@ -46,64 +46,92 @@ function videoTrak(view, moov) {
   return null;
 }
 
+/**
+ * Presentation time in seconds of each sample of the track, in decode order,
+ * counted from the first frame, plus the track's length. Null if unreadable.
+ */
+function trackTiming(view, trak) {
+  const mdhd = find(view, trak, ["mdia", "mdhd"]);
+  const stts = find(view, trak, ["mdia", "minf", "stbl", "stts"]);
+  if (!mdhd || !stts) return null;
+
+  const v1 = view.getUint8(mdhd.start) === 1;
+  const timescale = view.getUint32(mdhd.start + (v1 ? 20 : 12));
+  if (!timescale) return null;
+
+  // stts gives decode-order sample durations.
+  const pts = [];
+  let t = 0;
+  const sttsCount = view.getUint32(stts.start + 4);
+  for (let i = 0; i < sttsCount; i++) {
+    const count = view.getUint32(stts.start + 8 + i * 8);
+    const delta = view.getUint32(stts.start + 12 + i * 8);
+    for (let j = 0; j < count; j++, t += delta) pts.push(t);
+  }
+  if (!pts.length) return null;
+  const end = t;
+
+  // ctts (present with B-frames) shifts decode times to presentation times.
+  const ctts = find(view, trak, ["mdia", "minf", "stbl", "ctts"]);
+  if (ctts) {
+    const signed = view.getUint8(ctts.start) === 1;
+    const n = view.getUint32(ctts.start + 4);
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+      const count = view.getUint32(ctts.start + 8 + i * 8);
+      const at = ctts.start + 12 + i * 8;
+      const offset = signed ? view.getInt32(at) : view.getUint32(at);
+      for (let j = 0; j < count && k < pts.length; j++, k++) pts[k] += offset;
+    }
+  }
+
+  // Normalise so the first frame starts at 0; B-frame streams are shifted
+  // by the composition offset (normally undone by an edit list).
+  const first = pts.reduce((a, b) => Math.min(a, b));
+  const times = pts.map((p) => (p - first) / timescale);
+  const last = times.reduce((a, b) => Math.max(a, b));
+  // Total of the sample durations is the presentation length.
+  return { times, duration: Math.max(end / timescale, last) };
+}
+
+function sorted(timing) {
+  return { times: [...timing.times].sort((a, b) => a - b), duration: timing.duration };
+}
+
 /** @returns {{ times: number[], duration: number } | null} frame start times in seconds, sorted */
 export function frameTimes(buffer) {
   try {
     const view = new DataView(buffer);
     const moov = find(view, { start: 0, end: buffer.byteLength }, ["moov"]);
     const trak = moov && videoTrak(view, moov);
-    const mdhd = trak && find(view, trak, ["mdia", "mdhd"]);
-    const stts = trak && find(view, trak, ["mdia", "minf", "stbl", "stts"]);
-    if (!mdhd || !stts) return null;
-
-    const v1 = view.getUint8(mdhd.start) === 1;
-    const timescale = view.getUint32(mdhd.start + (v1 ? 20 : 12));
-    if (!timescale) return null;
-
-    // stts gives decode-order sample durations.
-    const pts = [];
-    let t = 0;
-    const sttsCount = view.getUint32(stts.start + 4);
-    for (let i = 0; i < sttsCount; i++) {
-      const count = view.getUint32(stts.start + 8 + i * 8);
-      const delta = view.getUint32(stts.start + 12 + i * 8);
-      for (let j = 0; j < count; j++, t += delta) pts.push(t);
-    }
-    if (!pts.length) return null;
-    const end = t;
-
-    // ctts (present with B-frames) shifts decode times to presentation times.
-    const ctts = find(view, trak, ["mdia", "minf", "stbl", "ctts"]);
-    if (ctts) {
-      const signed = view.getUint8(ctts.start) === 1;
-      const n = view.getUint32(ctts.start + 4);
-      let k = 0;
-      for (let i = 0; i < n; i++) {
-        const count = view.getUint32(ctts.start + 8 + i * 8);
-        const at = ctts.start + 12 + i * 8;
-        const offset = signed ? view.getInt32(at) : view.getUint32(at);
-        for (let j = 0; j < count && k < pts.length; j++, k++) pts[k] += offset;
-      }
-    }
-
-    pts.sort((a, b) => a - b);
-    // Normalise so the first frame starts at 0; B-frame streams are shifted
-    // by the composition offset (normally undone by an edit list).
-    const first = pts[0];
-    const times = pts.map((p) => (p - first) / timescale);
-    // Total of the sample durations is the presentation length.
-    return { times, duration: Math.max(end / timescale, times.at(-1)) };
+    const timing = trak && trackTiming(view, trak);
+    return timing && sorted(timing);
   } catch {
     return null;
   }
+}
+
+/** Clockwise rotation (0, 90, 180 or 270) from the tkhd display matrix. */
+function rotation(view, trak) {
+  const tkhd = find(view, trak, ["tkhd"]);
+  if (!tkhd) return 0;
+  // tkhd: the 3×3 matrix (16.16 fixed point a, b, u, c, d, v, x, y, w)
+  // follows 40 bytes of fields in version 0, 52 in version 1.
+  const at = tkhd.start + (view.getUint8(tkhd.start) === 1 ? 52 : 40);
+  const a = view.getInt32(at);
+  const b = view.getInt32(at + 4);
+  const degrees = Math.round(Math.atan2(b, a) / (Math.PI / 2)) * 90;
+  return (degrees + 360) % 360;
 }
 
 /**
  * Everything needed to decode the first video track with WebCodecs: the
  * VideoDecoderConfig plus every sample in decode order, with presentation
  * times in seconds counted from the first frame. Only plain (unfragmented)
- * H.264, which is what X serves; null for anything else.
- * @returns {{ config: VideoDecoderConfig, width: number, height: number,
+ * H.264, which is what X serves; null for anything else. rotation is how far
+ * the picture must be turned clockwise for display.
+ * @returns {{ config: VideoDecoderConfig, rotation: number,
+ *   timing: { times: number[], duration: number },
  *   samples: { offset: number, size: number, time: number, key: boolean }[] } | null}
  */
 export function videoSamples(buffer) {
@@ -112,8 +140,8 @@ export function videoSamples(buffer) {
     const moov = find(view, { start: 0, end: buffer.byteLength }, ["moov"]);
     const trak = moov && videoTrak(view, moov);
     const stbl = trak && find(view, trak, ["mdia", "minf", "stbl"]);
-    const mdhd = trak && find(view, trak, ["mdia", "mdhd"]);
-    if (!stbl || !mdhd) return null;
+    const timing = trak && trackTiming(view, trak);
+    if (!stbl || !timing) return null;
     const box = (type) => find(view, stbl, [type]);
 
     // stsd: version/flags(4) entry_count(4), then sample entries. A visual
@@ -126,24 +154,22 @@ export function videoSamples(buffer) {
     if (!avcC) return null;
     const description = new Uint8Array(buffer.slice(avcC.start, avcC.end));
     const hex = (i) => description[i].toString(16).padStart(2, "0");
-    const width = view.getUint16(entry.start + 24);
-    const height = view.getUint16(entry.start + 26);
+    const codedWidth = view.getUint16(entry.start + 24);
+    const codedHeight = view.getUint16(entry.start + 26);
 
-    const v1 = view.getUint8(mdhd.start) === 1;
-    const timescale = view.getUint32(mdhd.start + (v1 ? 20 : 12));
     const stsz = box("stsz");
     const stsc = box("stsc");
     const stco = box("stco") || box("co64");
-    const stts = box("stts");
-    if (!timescale || !stsz || !stsc || !stco || !stts) return null;
+    if (!stsz || !stsc || !stco) return null;
 
     // stsz: version/flags(4) sample_size(4) sample_count(4) [entry_size(4)...]
     const fixedSize = view.getUint32(stsz.start + 4);
     const count = view.getUint32(stsz.start + 8);
+    if (count !== timing.times.length) return null;
     const samples = Array.from({ length: count }, (_, i) => ({
       size: fixedSize || view.getUint32(stsz.start + 12 + i * 4),
       offset: 0,
-      time: 0,
+      time: timing.times[i],
       key: true,
     }));
 
@@ -180,34 +206,11 @@ export function videoSamples(buffer) {
       }
     }
 
-    // Decode times from stts, shifted to presentation times by ctts.
-    let t = 0;
-    s = 0;
-    for (let i = 0, n = view.getUint32(stts.start + 4); i < n; i++) {
-      const runCount = view.getUint32(stts.start + 8 + i * 8);
-      const delta = view.getUint32(stts.start + 12 + i * 8);
-      for (let j = 0; j < runCount && s < count; j++, s++, t += delta) samples[s].time = t;
-    }
-    const ctts = box("ctts");
-    if (ctts) {
-      const signed = view.getUint8(ctts.start) === 1;
-      s = 0;
-      for (let i = 0, n = view.getUint32(ctts.start + 4); i < n; i++) {
-        const runCount = view.getUint32(ctts.start + 8 + i * 8);
-        const at = ctts.start + 12 + i * 8;
-        const offset = signed ? view.getInt32(at) : view.getUint32(at);
-        for (let j = 0; j < runCount && s < count; j++, s++) samples[s].time += offset;
-      }
-    }
-    // Same normalisation as frameTimes, so times match up between the two.
-    const first = Math.min(...samples.map((sample) => sample.time));
-    samples.forEach((sample) => (sample.time = (sample.time - first) / timescale));
-
     if (samples.some((sample) => sample.offset + sample.size > buffer.byteLength)) return null;
     return {
-      config: { codec: `avc1.${hex(1)}${hex(2)}${hex(3)}`, codedWidth: width, codedHeight: height, description },
-      width,
-      height,
+      config: { codec: `avc1.${hex(1)}${hex(2)}${hex(3)}`, codedWidth, codedHeight, description },
+      rotation: rotation(view, trak),
+      timing: sorted(timing),
       samples,
     };
   } catch {

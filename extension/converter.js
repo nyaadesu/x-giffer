@@ -18,17 +18,30 @@ const PALETTE_FRAMES = 60;
 const NOISE_THRESHOLD = 3 * 4 * 4;
 // Encoded chunks queued in the WebCodecs decoder before waiting for it.
 const DECODE_AHEAD = 8;
+// How long a decoder may go without producing anything before we give up.
+// Some fail by going silent instead of reporting an error, which would leave
+// the button spinning forever.
+const STALL_MS = 20_000;
 
 function once(target, event, errorEvent = "error") {
   return new Promise((resolve, reject) => {
-    const ok = () => {
+    const done = () => {
+      clearTimeout(timer);
+      target.removeEventListener(event, ok);
       target.removeEventListener(errorEvent, fail);
+    };
+    const ok = () => {
+      done();
       resolve();
     };
     const fail = () => {
-      target.removeEventListener(event, ok);
+      done();
       reject(new Error(`video ${errorEvent} while waiting for ${event}`));
     };
+    const timer = setTimeout(() => {
+      done();
+      reject(new Error(`video timed out waiting for ${event}`));
+    }, STALL_MS);
     target.addEventListener(event, ok, { once: true });
     target.addEventListener(errorEvent, fail, { once: true });
   });
@@ -55,8 +68,10 @@ function planFrames(timing, maxFps) {
 }
 
 // A frame source opens the MP4 and reads frames out of it as RGBA pixels:
-// { width, height, timing, read(frames, draw), close() }. read() takes plan
-// entries in increasing order and yields draw(image) for each one.
+// { width, height, rotation, timing, read(frames, draw), close() }. width and
+// height are as displayed; images handed to draw() still need turning
+// clockwise by `rotation` degrees. read() takes plan entries in increasing
+// order and yields draw(image) for each one.
 
 // WebCodecs failed while decoding, so mp4ToGif retries with a <video>.
 class DecodeError extends Error {}
@@ -69,32 +84,76 @@ class DecodeError extends Error {}
 async function webCodecsSource(buffer) {
   if (typeof VideoDecoder === "undefined") return null;
   const track = videoSamples(buffer);
-  const timing = track && frameTimes(buffer);
-  if (!timing) return null;
-  const { config, samples } = track;
+  if (!track) return null;
+  const { config, samples, rotation, timing } = track;
+  const micros = (seconds) => Math.round(seconds * 1e6);
+  const chunk = (sample) =>
+    new EncodedVideoChunk({
+      type: sample.key ? "key" : "delta",
+      timestamp: micros(sample.time),
+      data: new Uint8Array(buffer, sample.offset, sample.size),
+    });
+
+  // Decode the first frame up front: it proves the decoder really works, and
+  // its display size includes the pixel aspect from the stream, as a <video>
+  // would show it.
+  let size = null;
+  const probe = new VideoDecoder({
+    output: (frame) => {
+      size ??= { width: frame.displayWidth, height: frame.displayHeight };
+      frame.close();
+    },
+    error: () => {},
+  });
   try {
-    if (!(await VideoDecoder.isConfigSupported(config)).supported) return null;
+    if (!samples[0]?.key || !(await VideoDecoder.isConfigSupported(config)).supported) return null;
+    probe.configure(config);
+    probe.decode(chunk(samples[0]));
+    let timer;
+    await Promise.race([
+      probe.flush(),
+      new Promise((_, reject) => (timer = setTimeout(reject, STALL_MS))),
+    ]).finally(() => clearTimeout(timer));
   } catch {
     return null;
+  } finally {
+    if (probe.state !== "closed") probe.close();
   }
-  const micros = (seconds) => Math.round(seconds * 1e6);
+  if (!size?.width || !size?.height) return null;
 
   async function* read(frames, draw) {
     // Decode everything in order and keep the frames the plan asks for.
     const wanted = frames.map((f) => micros(f.start));
     const ready = [];
     let next = 0;
+    // A decoder error is retried with a <video>; an error of our own isn't.
     let failure = null;
+    let drawError = null;
+    const stopped = () => failure || drawError;
     let wake = null;
-    const notify = () => wake?.();
+    let lastActivity = Date.now();
+    const notify = () => {
+      lastActivity = Date.now();
+      wake?.();
+    };
     const decoder = new VideoDecoder({
       output: (frame) => {
-        if (frame.timestamp === wanted[next]) {
-          ready.push(draw(frame));
-          next++;
+        try {
+          // Take the first frame at or after each wanted time, so a frame the
+          // decoder drops or retimes doesn't cost every frame after it.
+          if (!drawError && frame.timestamp >= wanted[next]) {
+            const data = draw(frame);
+            while (frame.timestamp >= wanted[next]) {
+              ready.push(data);
+              next++;
+            }
+          }
+        } catch (err) {
+          drawError = err;
+        } finally {
+          frame.close();
+          notify();
         }
-        frame.close();
-        notify();
       },
       error: (err) => {
         failure = err;
@@ -102,35 +161,57 @@ async function webCodecsSource(buffer) {
       },
     });
     decoder.addEventListener("dequeue", notify);
+    // Wake on decoder activity, or shortly anyway: Chrome before 106 has no
+    // dequeue event. Give up if the decoder goes quiet for too long.
+    const waitForDecoder = async () => {
+      await new Promise((resolve) => {
+        wake = resolve;
+        setTimeout(resolve, 100);
+      });
+      wake = null;
+      if (Date.now() - lastActivity > STALL_MS) throw new DecodeError("video decode stalled");
+    };
+
     try {
       decoder.configure(config);
       for (const sample of samples) {
-        if (failure || next === wanted.length) break;
-        decoder.decode(
-          new EncodedVideoChunk({
-            type: sample.key ? "key" : "delta",
-            timestamp: micros(sample.time),
-            data: new Uint8Array(buffer, sample.offset, sample.size),
-          }),
-        );
+        if (stopped() || next === wanted.length) break;
+        decoder.decode(chunk(sample));
+        lastActivity = Date.now();
         while (ready.length) yield ready.shift();
-        while (!failure && decoder.decodeQueueSize > DECODE_AHEAD) {
-          await new Promise((resolve) => (wake = resolve));
-          wake = null;
-        }
+        while (!stopped() && decoder.decodeQueueSize > DECODE_AHEAD) await waitForDecoder();
       }
-      if (!failure && next < wanted.length) await decoder.flush();
+      if (!stopped() && next < wanted.length) {
+        let flushed = false;
+        const flush = decoder.flush().finally(() => {
+          flushed = true;
+          notify();
+        });
+        flush.catch(() => {});
+        while (!flushed) await waitForDecoder();
+        await flush;
+      }
+      if (drawError) throw drawError;
       if (failure) throw new DecodeError(`video decode failed: ${failure.message || failure}`);
       while (ready.length) yield ready.shift();
       if (next < wanted.length) throw new DecodeError("video decode skipped frames");
     } catch (err) {
-      throw err instanceof DecodeError ? err : new DecodeError(`video decode failed: ${err?.message || err}`);
+      if (err instanceof DecodeError || err === drawError) throw err;
+      throw new DecodeError(`video decode failed: ${err?.message || err}`);
     } finally {
       if (decoder.state !== "closed") decoder.close();
     }
   }
 
-  return { width: track.width, height: track.height, timing, read, close() {} };
+  const turned = rotation % 180 !== 0;
+  return {
+    width: turned ? size.height : size.width,
+    height: turned ? size.width : size.height,
+    rotation,
+    timing,
+    read,
+    close() {},
+  };
 }
 
 /** Play the MP4 in a <video> element and seek to each frame. */
@@ -169,8 +250,10 @@ async function videoSource(mp4Blob, buffer) {
     }
 
     return {
+      // The <video> already shows it turned the right way.
       width: video.videoWidth,
       height: video.videoHeight,
+      rotation: 0,
       timing: { times: timing.times, duration: Math.min(timing.duration, duration) },
       read,
       close,
@@ -190,6 +273,7 @@ async function videoSource(mp4Blob, buffer) {
 export async function mp4ToGif(mp4Blob, options, onProgress = () => {}) {
   const buffer = await mp4Blob.arrayBuffer();
   const fast = await webCodecsSource(buffer);
+  let fastError = null;
   if (fast) {
     try {
       return await encode(fast, options, onProgress);
@@ -197,10 +281,17 @@ export async function mp4ToGif(mp4Blob, options, onProgress = () => {}) {
       // A browser can claim support and still fail partway; start over the slow way.
       if (!(err instanceof DecodeError)) throw err;
       console.warn("[X Giffer] WebCodecs failed, retrying with <video>:", err);
+      fastError = err;
       onProgress(0);
     }
   }
-  return encode(await videoSource(mp4Blob, buffer), options, onProgress);
+  try {
+    return await encode(await videoSource(mp4Blob, buffer), options, onProgress);
+  } catch (err) {
+    // Show both, or the failure that made us retry would be hidden.
+    if (!fastError) throw err;
+    throw new Error(`${err.message} (after ${fastError.message})`, { cause: err });
+  }
 }
 
 async function encode(source, { maxFps = 0, maxWidth = 0, colors = 256, maxPixels = 0 }, onProgress) {
@@ -222,8 +313,13 @@ async function encode(source, { maxFps = 0, maxWidth = 0, colors = 256, maxPixel
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     ctx.imageSmoothingQuality = "high";
 
+    // Turn the canvas about its centre once, then draw every frame unturned.
+    const turned = source.rotation % 180 !== 0;
+    const [drawWidth, drawHeight] = turned ? [height, width] : [width, height];
+    ctx.translate(width / 2, height / 2);
+    ctx.rotate((source.rotation * Math.PI) / 180);
     const draw = (image) => {
-      ctx.drawImage(image, 0, 0, width, height);
+      ctx.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
       return ctx.getImageData(0, 0, width, height).data;
     };
 
