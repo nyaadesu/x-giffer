@@ -1,4 +1,5 @@
 import { mp4ToGif } from "../extension/converter.js";
+import { fetchOrStall } from "../extension/net.js";
 import { DEFAULT_PRESET, fillPresetSelect, presetOptions } from "../extension/presets.js";
 import { checkGifLength, MAX_GIF_SECONDS, pickVariant, videoGifSettings } from "../extension/video.js";
 
@@ -67,7 +68,7 @@ function parseStatus(text) {
 // `url` is what to convert and with which settings, `mp4Url` the best version
 // for the "Original MP4" link.
 async function lookupMedia(id, settings) {
-  const res = await fetch(`https://api.fxtwitter.com/status/${id}`);
+  const res = await fetchOrStall(`https://api.fxtwitter.com/status/${id}`);
   if (!res.ok) throw new Error(`Couldn't load the post (HTTP ${res.status})`);
   const { tweet } = await res.json();
   if (!tweet) throw new Error("Post not found");
@@ -177,7 +178,7 @@ async function run(text, { shared = false } = {}) {
       const label = gifs.length > 1 ? ` ${i + 1}/${gifs.length}` : "";
       setStatus(`Downloading${label}…`);
       // video.twimg.com 403s any non-X Referer, so send none.
-      const res = await fetch(gif.url, { referrerPolicy: "no-referrer" });
+      const res = await fetchOrStall(gif.url, { referrerPolicy: "no-referrer" });
       if (!res.ok) throw new Error(`Couldn't download the video (HTTP ${res.status})`);
       const mp4 = await res.blob();
 

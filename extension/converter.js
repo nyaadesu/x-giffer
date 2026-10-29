@@ -132,6 +132,7 @@ async function webCodecsSource(buffer) {
     const stopped = () => failure || drawError;
     let wake = null;
     let lastActivity = Date.now();
+    let lastTimestamp = -Infinity;
     const notify = () => {
       lastActivity = Date.now();
       wake?.();
@@ -139,9 +140,13 @@ async function webCodecsSource(buffer) {
     const decoder = new VideoDecoder({
       output: (frame) => {
         try {
+          // The matching below relies on frames arriving in presentation
+          // order; anything else would silently scramble the GIF.
+          if (frame.timestamp < lastTimestamp) failure ??= new Error("decoder output frames out of order");
+          lastTimestamp = frame.timestamp;
           // Take the first frame at or after each wanted time, so a frame the
           // decoder drops or retimes doesn't cost every frame after it.
-          if (!drawError && frame.timestamp >= wanted[next]) {
+          if (!stopped() && frame.timestamp >= wanted[next]) {
             const data = draw(frame);
             while (frame.timestamp >= wanted[next]) {
               ready.push(data);
@@ -165,8 +170,11 @@ async function webCodecsSource(buffer) {
     // dequeue event. Give up if the decoder goes quiet for too long.
     const waitForDecoder = async () => {
       await new Promise((resolve) => {
-        wake = resolve;
-        setTimeout(resolve, 100);
+        const timer = setTimeout(resolve, 100);
+        wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
       });
       wake = null;
       if (Date.now() - lastActivity > STALL_MS) throw new DecodeError("video decode stalled");

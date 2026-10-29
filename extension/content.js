@@ -1,5 +1,9 @@
 (() => {
   const MARK = "xgdAttached";
+  // Each video's button bar and back, so a bar can be rebuilt when X reuses
+  // the <video> for another post or drops the bar while re-rendering.
+  const bars = new WeakMap();
+  const owners = new WeakMap();
   const SRC_RE = /video\.twimg\.com\/tweet_video\/([\w-]+)\.mp4/;
   const POSTER_RE = /pbs\.twimg\.com\/tweet_video_thumb\/([\w-]+)\./;
   const VIDEO_POSTER_RE = /pbs\.twimg\.com\/(?:amplify_video_thumb|ext_tw_video_thumb)\/(\d+)\//;
@@ -48,6 +52,8 @@
     const label = button.textContent;
     button.disabled = true;
     button.textContent = "…";
+    // Drop the last failure's reason; it stays on the ✗ until the next try.
+    button.title = button.dataset.title;
 
     const reset = (text) => {
       button.textContent = text;
@@ -85,6 +91,7 @@
     b.className = "xgd-btn";
     b.textContent = text;
     b.title = title;
+    b.dataset.title = title;
     for (const ev of ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend"]) {
       b.addEventListener(ev, swallow);
     }
@@ -96,11 +103,14 @@
   }
 
   function attach(video) {
-    if (video.dataset[MARK]) return;
     const gif = gifMediaId(video);
     const media = gif ? { gif } : { video: videoMediaId(video) };
-    if (!media.gif && !media.video) return;
-    video.dataset[MARK] = "1";
+    const key = media.gif || media.video;
+    if (!key) return;
+    const old = bars.get(video);
+    if (old?.isConnected && video.dataset[MARK] === key) return;
+    old?.remove();
+    video.dataset[MARK] = key;
     const kind = media.gif ? "GIF" : "video";
 
     const host = video.closest('[data-testid="videoPlayer"]') || video.parentElement;
@@ -113,6 +123,8 @@
       makeButton("MP4", `Download ${kind} as MP4`, (b) => run(b, video, media, "mp4")),
     );
     host.append(bar);
+    bars.set(video, bar);
+    owners.set(bar, video);
   }
 
   function scan(root) {
@@ -129,6 +141,11 @@
         if (m.target.tagName === "VIDEO") attach(m.target);
       } else {
         m.addedNodes.forEach(scan);
+        // X re-rendering the player can throw our bar away; put it back.
+        m.removedNodes.forEach((node) => {
+          const video = owners.get(node);
+          if (video?.isConnected) attach(video);
+        });
       }
     }
   }).observe(document.body, {

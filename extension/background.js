@@ -1,4 +1,5 @@
 import { mp4ToGif } from "./converter.js";
+import { fetchOrStall } from "./net.js";
 import { loadSettings } from "./settings.js";
 import { checkGifLength, pickVariant, videoGifSettings } from "./video.js";
 
@@ -9,14 +10,17 @@ const VIDEO_URL = /^https:\/\/video\.twimg\.com\/(?:amplify_video|ext_tw_video)\
 // download finishes, so track them and revoke on completion.
 const pendingUrls = new Map();
 
-browser.downloads.onChanged.addListener((delta) => {
-  const state = delta.state?.current;
-  if (state !== "complete" && state !== "interrupted") return;
-  const url = pendingUrls.get(delta.id);
+function release(id) {
+  const url = pendingUrls.get(id);
   if (url) {
     URL.revokeObjectURL(url);
-    pendingUrls.delete(delta.id);
+    pendingUrls.delete(id);
   }
+}
+
+browser.downloads.onChanged.addListener((delta) => {
+  const state = delta.state?.current;
+  if (state === "complete" || state === "interrupted") release(delta.id);
 });
 
 async function saveBlob(blob, filename) {
@@ -24,6 +28,10 @@ async function saveBlob(blob, filename) {
   try {
     const id = await browser.downloads.download({ url, filename, conflictAction: "uniquify" });
     pendingUrls.set(id, url);
+    // A small file can finish before the line above runs, and then its
+    // onChanged event has already been and gone.
+    const [item] = await browser.downloads.search({ id });
+    if (!item || item.state !== "in_progress") release(id);
   } catch (err) {
     URL.revokeObjectURL(url);
     throw err;
@@ -32,7 +40,7 @@ async function saveBlob(blob, filename) {
 
 async function fetchMp4(url) {
   // video.twimg.com 403s any non-X Referer, so send none.
-  const res = await fetch(url, { credentials: "omit", referrerPolicy: "no-referrer" });
+  const res = await fetchOrStall(url, { credentials: "omit", referrerPolicy: "no-referrer" });
   if (!res.ok) throw new Error(`fetch failed: HTTP ${res.status}`);
   return res.blob();
 }
@@ -47,7 +55,7 @@ function syndicationToken(id) {
  * post itself or in a post it quotes, so match it by the media ID from its poster.
  */
 async function lookupVideo(tweetId, mediaId) {
-  const res = await fetch(
+  const res = await fetchOrStall(
     `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&token=${syndicationToken(tweetId)}`,
     { credentials: "omit", referrerPolicy: "no-referrer" },
   );
