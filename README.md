@@ -9,8 +9,8 @@ Android) · **[Open the Android share app](https://nyaadesu.github.io/x-giffer/)
 
 Save GIFs from X (Twitter) as real `.gif` files. X stores "GIFs" as silent MP4s
 (`video.twimg.com/tweet_video/<id>.mp4`). This project fetches that MP4 and converts it to an
-animated GIF on your own device: it steps through the video frame by frame onto a canvas and
-encodes the frames with [gifenc](https://github.com/mattdesl/gifenc). No third-party conversion
+animated GIF on your own device: it decodes the video frame by frame onto a canvas, using the
+browser's own decoder, and encodes the frames with [gifenc](https://github.com/mattdesl/gifenc). No third-party conversion
 service is involved. Short videos (up to 60 seconds) can be turned into GIFs the same way, and
 any video can be saved as an MP4.
 
@@ -112,6 +112,11 @@ Notes:
   `referrerPolicy: "no-referrer"`.
 - In the extension, the conversion runs in the background page (Firefox background pages have
   a DOM), so it isn't affected by x.com's CSP and doesn't slow down the tab.
+- Firefox on macOS **can't decode a `<video>` in a background page** at all (it fails with
+  "Expected Planar YCbCr image", or just never loads). So frames are decoded with WebCodecs
+  (`VideoDecoder`), reading the H.264 samples straight out of the MP4 (`extension/mp4.js`).
+  A `<video>` that seeks to each frame is the fallback where WebCodecs is missing (Firefox for
+  Android) or fails. Don't make the `<video>` the main path again without testing on a Mac.
 - Real X *videos* are streamed through MSE (`blob:` URLs), so the page never shows their MP4
   URL. The extension reads the media ID from the video's poster and looks the post up on X's
   own embed API (`cdn.syndication.twimg.com`, the endpoint embedded posts use) to find the MP4
